@@ -1,3 +1,4 @@
+# main.py (исправленная версия для parent.id)
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +10,14 @@ import os
 from dotenv import load_dotenv
 from enum import Enum
 import json
+import re
 
 load_dotenv()
 
 app = FastAPI(
     title="University Schedule Miro API",
     description="API для управления онлайн-расписанием университета на платформе Miro",
-    version="1.0.4",
+    version="1.0.6",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -62,7 +64,7 @@ class CreateTextRequest(BaseModel):
     """Запрос на создание текста"""
     content: str = Field(..., description="Текст")
     position: Position = Field(default=Position(x=0, y=0), description="Позиция на доске")
-    font_size: float = Field(default=14, ge=1, le=200, description="Размер шрифта (1-200)")
+    font_size: int = Field(default=14, ge=1, le=200, description="Размер шрифта (целое число 1-200)")
     color: str = Field(default="#1a1a1a", description="Цвет текста (hex)")
     text_align: str = Field(default="center", description="Выравнивание (left, center, right)")
 
@@ -75,7 +77,7 @@ class CreateCardRequest(BaseModel):
     width: float = Field(default=300, ge=256, le=2000, description="Ширина карточки (мин 256)")
     height: float = Field(default=200, ge=50, le=2000, description="Высота карточки (мин 50)")
     fill_color: str = Field(default="#ffffff", description="Цвет фона (hex)")
-    frame_id: Optional[str] = Field(None, description="ID родительского фрейма")
+    frame_id: Optional[str] = Field(None, description="ID родительского фрейма (числовой ID)")
 
 
 class CreateFrameRequest(BaseModel):
@@ -94,7 +96,32 @@ class CreateLectureRequest(BaseModel):
     teacher: str = Field(..., description="Преподаватель")
     subject_type: SubjectType = Field(default=SubjectType.LECTURE, description="Тип занятия")
     position: Position = Field(default=Position(x=0, y=0), description="Позиция на доске")
-    frame_id: Optional[str] = Field(None, description="ID фрейма дня")
+    frame_id: Optional[str] = Field(None, description="ID фрейма дня (числовой ID)")
+
+
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+
+def extract_numeric_id(item_id: str) -> Optional[str]:
+    """
+    Извлекает числовой ID из строкового ID Miro
+    Miro ID могут быть в формате: '34567890123456789012' или 'uXjV1234567890='
+    """
+    if not item_id:
+        return None
+
+    # Убираем возможные префиксы и суффиксы
+    item_id = str(item_id).strip()
+
+    # Если это уже число, возвращаем как есть
+    if item_id.isdigit():
+        return item_id
+
+    # Пытаемся извлечь числовую часть
+    match = re.search(r'\d+', item_id)
+    if match:
+        return match.group(0)
+
+    return None
 
 
 # ========== ЭНДПОИНТЫ API ==========
@@ -105,7 +132,7 @@ async def create_text_element(request: CreateTextRequest):
     Создание текстового элемента на доске Miro
 
     Ограничения Miro API:
-    - font_size: от 1 до 200
+    - font_size: целое число от 1 до 200
     - content: до 5000 символов
     """
     headers = {
@@ -118,7 +145,7 @@ async def create_text_element(request: CreateTextRequest):
     if not color.startswith('#'):
         color = f"#{color}"
     if len(color) != 7:  # #RRGGBB
-        color = "#1a1a1a"  # fallback
+        color = "#1a1a1a"
 
     # Проверяем и корректируем выравнивание
     text_align = request.text_align.lower()
@@ -127,7 +154,7 @@ async def create_text_element(request: CreateTextRequest):
 
     payload = {
         "data": {
-            "content": request.content[:5000]  # Ограничение Miro
+            "content": request.content[:5000]
         },
         "position": {
             "origin": "center",
@@ -136,7 +163,7 @@ async def create_text_element(request: CreateTextRequest):
         },
         "style": {
             "color": color,
-            "fontSize": min(max(request.font_size, 1), 200),  # Ограничение 1-200
+            "fontSize": max(1, min(request.font_size, 200)),
             "textAlign": text_align
         }
     }
@@ -167,6 +194,7 @@ async def create_card_element(request: CreateCardRequest):
     - height: минимум 50 пикселей
     - title: до 500 символов
     - description: до 5000 символов
+    - frame_id: должен быть числовым ID
     """
     headers = {
         "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
@@ -177,17 +205,17 @@ async def create_card_element(request: CreateCardRequest):
     fill_color = request.fill_color.strip()
     if not fill_color.startswith('#'):
         fill_color = f"#{fill_color}"
-    if len(fill_color) != 7:  # #RRGGBB
-        fill_color = "#ffffff"  # fallback
+    if len(fill_color) != 7:
+        fill_color = "#ffffff"
 
-    # Проверяем размеры (Miro требует width >= 256)
+    # Проверяем размеры
     width = max(request.width, 256)
     height = max(request.height, 50)
 
     payload = {
         "data": {
-            "title": request.title[:500],  # Ограничение Miro
-            "description": request.description[:5000]  # Ограничение Miro
+            "title": request.title[:500],
+            "description": request.description[:5000]
         },
         "position": {
             "origin": "center",
@@ -196,7 +224,6 @@ async def create_card_element(request: CreateCardRequest):
         },
         "style": {
             "cardTheme": fill_color
-            # textAlign не поддерживается для карточек в Miro API!
         },
         "geometry": {
             "width": width,
@@ -204,9 +231,22 @@ async def create_card_element(request: CreateCardRequest):
         }
     }
 
-    # Добавляем родителя если указан
+    # Обрабатываем frame_id - преобразуем в числовой ID если нужно
     if request.frame_id and request.frame_id.strip():
-        payload["parent"] = {"id": request.frame_id.strip()}
+        frame_id = request.frame_id.strip()
+
+        # Если это не стандартное значение Swagger "string"
+        if frame_id != "string" and len(frame_id) > 1:
+            numeric_id = extract_numeric_id(frame_id)
+            if numeric_id and numeric_id.isdigit():
+                payload["parent"] = {"id": numeric_id}
+            else:
+                # Если не можем извлечь числовой ID, используем как есть
+                # Miro API может принимать разные форматы
+                payload["parent"] = {"id": frame_id}
+
+    print(f"\n🔍 Создаем карточку в Miro API...")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -214,6 +254,9 @@ async def create_card_element(request: CreateCardRequest):
             headers=headers,
             json=payload
         )
+
+    print(f"Status: {response.status_code}")
+    print(f"Response: {response.text[:200]}")
 
     if response.status_code == 201:
         return response.json()
@@ -238,7 +281,6 @@ async def create_frame_element(request: CreateFrameRequest):
         "Content-Type": "application/json"
     }
 
-    # Проверяем и корректируем цвет
     fill_color = request.fill_color.strip()
     if not fill_color.startswith('#'):
         fill_color = f"#{fill_color}"
@@ -291,23 +333,21 @@ async def create_lecture(request: CreateLectureRequest):
         "Content-Type": "application/json"
     }
 
-    # Цветовая схема по типам занятий
     subject_colors = {
-        SubjectType.LECTURE: "#E3F2FD",  # светло-синий
-        SubjectType.PRACTICE: "#E8F5E9",  # светло-зеленый
-        SubjectType.LABORATORY: "#FFF3E0",  # светло-оранжевый
-        SubjectType.SEMINAR: "#F3E5F5",  # светло-фиолетовый
-        SubjectType.EXAM: "#FFEBEE"  # светло-красный
+        SubjectType.LECTURE: "#E3F2FD",
+        SubjectType.PRACTICE: "#E8F5E9",
+        SubjectType.LABORATORY: "#FFF3E0",
+        SubjectType.SEMINAR: "#F3E5F5",
+        SubjectType.EXAM: "#FFEBEE"
     }
 
-    # Форматируем описание
     full_description = (
                            f"⏰ Время: {request.time}\n"
                            f"🏫 Аудитория: {request.classroom}\n"
                            f"👨‍🏫 Преподаватель: {request.teacher}\n"
                            f"📚 Тип: {request.subject_type.value}\n\n"
                            f"{request.description}"
-                       )[:5000]  # Ограничение Miro
+                       )[:5000]
 
     fill_color = subject_colors.get(request.subject_type, "#ffffff")
 
@@ -325,14 +365,20 @@ async def create_lecture(request: CreateLectureRequest):
             "cardTheme": fill_color
         },
         "geometry": {
-            "width": 300,  # Оптимальный размер для карточки пары
+            "width": 300,  # Исправлено с 250 на 300 (или 256+)
             "height": 200
         }
     }
 
-    # Добавляем родителя если указан
+    # Обрабатываем frame_id
     if request.frame_id and request.frame_id.strip():
-        payload["parent"] = {"id": request.frame_id.strip()}
+        frame_id = request.frame_id.strip()
+        if frame_id != "string" and len(frame_id) > 1:
+            numeric_id = extract_numeric_id(frame_id)
+            if numeric_id and numeric_id.isdigit():
+                payload["parent"] = {"id": numeric_id}
+            else:
+                payload["parent"] = {"id": frame_id}
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -350,52 +396,85 @@ async def create_lecture(request: CreateLectureRequest):
         )
 
 
-# ========== ДЕМО ЭНДПОИНТЫ ==========
+# ========== ПОЛЕЗНЫЕ ЭНДПОИНТЫ ==========
 
-@app.post("/demo/create-simple-card", tags=["Demo"])
-async def demo_create_simple_card():
-    """Демо: создание простой карточки с правильными параметрами"""
+@app.get("/board/items/{item_id}", tags=["Board"])
+async def get_item_by_id(item_id: str):
+    """Получение информации о конкретном элементе по ID"""
     headers = {
         "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
+        "Accept": "application/json"
     }
 
-    payload = {
-        "data": {
-            "title": "Простая карточка",
-            "description": "Создана в демо-режиме через API"
-        },
-        "position": {
-            "origin": "center",
-            "x": 500,
-            "y": 500
-        },
-        "style": {
-            "cardTheme": "#E3F2FD"
-            # textAlign удален - не поддерживается для карточек
-        },
-        "geometry": {
-            "width": 300,  # МИНИМУМ 256!
-            "height": 200
-        }
-    }
-
-    print(f"\n🔍 Отправляем запрос в Miro API...")
-    print(f"Board ID: {MIRO_BOARD_ID}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
+    print(f"\n🔍 Получаем информацию об элементе: {item_id}")
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/cards",
-            headers=headers,
-            json=payload
+        response = await client.get(
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items/{item_id}",
+            headers=headers
+        )
+
+    if response.status_code == 200:
+        item_data = response.json()
+
+        # Добавляем полезную информацию
+        item_info = {
+            "id": item_data.get("id"),
+            "type": item_data.get("type"),
+            "title": item_data.get("data", {}).get("title"),
+            "description": item_data.get("data", {}).get("description"),
+            "created_at": item_data.get("createdAt"),
+            "position": item_data.get("position"),
+            "parent_id": item_data.get("parent", {}).get("id") if item_data.get("parent") else None
+        }
+
+        return {
+            "item_info": item_info,
+            "full_data": item_data
+        }
+    else:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Miro API error: {response.text}"
+        )
+
+
+@app.delete("/board/items/{item_id}", tags=["Board"], status_code=status.HTTP_200_OK)
+async def delete_item(item_id: str):
+    """Удаление элемента с доски по ID
+
+    Возвращает:
+    - 200: Успешное удаление
+    - 404: Элемент не найден
+    - 400: Ошибка удаления
+    """
+    headers = {
+        "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
+        "Accept": "application/json"
+    }
+
+    print(f"\n🗑️  Удаляем элемент: {item_id}")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items/{item_id}",
+            headers=headers
         )
 
     print(f"Status: {response.status_code}")
-    print(f"Response: {response.text[:200]}")
 
-    if response.status_code == 201:
-        return response.json()
+    if response.status_code == 204:
+        return {
+            "success": True,
+            "message": f"Элемент {item_id} успешно удален",
+            "item_id": item_id
+        }
+    elif response.status_code == 404:
+        return {
+            "success": False,
+            "message": f"Элемент {item_id} не найден",
+            "item_id": item_id
+        }
     else:
         raise HTTPException(
             status_code=response.status_code,
@@ -403,47 +482,77 @@ async def demo_create_simple_card():
         )
 
 
-@app.post("/demo/create-simple-text", tags=["Demo"])
-async def demo_create_simple_text():
-    """Демо: создание простого текста"""
+@app.delete("/board/cleanup/test-items", tags=["Board"])
+async def cleanup_test_items():
+    """Удаление всех тестовых элементов с доски"""
     headers = {
         "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
+        "Accept": "application/json"
     }
 
-    payload = {
-        "data": {
-            "content": "Привет от Miro API! 🎯"
-        },
-        "position": {
-            "origin": "center",
-            "x": -500,
-            "y": 500
-        },
-        "style": {
-            "color": "#1a1a1a",
-            "fontSize": 24,
-            "textAlign": "center"
-        }
-    }
+    print(f"\n🧹 Очистка тестовых элементов...")
 
+    # Получаем все элементы
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/texts",
-            headers=headers,
-            json=payload
+        response = await client.get(
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items?limit=50",
+            headers=headers
         )
 
-    if response.status_code == 201:
-        return response.json()
-    else:
+    if response.status_code != 200:
         raise HTTPException(
             status_code=response.status_code,
             detail=f"Miro API error: {response.text}"
         )
 
+    items = response.json().get("data", [])
+    deleted_items = []
+    failed_items = []
 
-# ========== ДОПОЛНИТЕЛЬНЫЕ ЭНДПОИНТЫ ==========
+    # Фильтруем тестовые элементы
+    test_keywords = ["тест", "Test", "TEST", "демо", "Демо", "DEMO", "карточка", "Карточка"]
+
+    for item in items:
+        item_id = item.get("id")
+        item_title = item.get("data", {}).get("title", "").lower()
+        item_desc = item.get("data", {}).get("description", "").lower()
+
+        # Проверяем, является ли элемент тестовым
+        is_test = any(keyword.lower() in item_title for keyword in test_keywords) or \
+                  any(keyword.lower() in item_desc for keyword in test_keywords)
+
+        if is_test:
+            try:
+                # Удаляем элемент
+                delete_response = await client.delete(
+                    f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items/{item_id}",
+                    headers=headers
+                )
+
+                if delete_response.status_code == 204:
+                    deleted_items.append({
+                        "id": item_id,
+                        "title": item.get("data", {}).get("title"),
+                        "type": item.get("type")
+                    })
+                else:
+                    failed_items.append({
+                        "id": item_id,
+                        "error": delete_response.text
+                    })
+            except Exception as e:
+                failed_items.append({
+                    "id": item_id,
+                    "error": str(e)
+                })
+
+    return {
+        "message": "Очистка тестовых элементов завершена",
+        "deleted_count": len(deleted_items),
+        "failed_count": len(failed_items),
+        "deleted_items": deleted_items,
+        "failed_items": failed_items
+    }
 
 @app.get("/board/items", tags=["Board"])
 async def get_board_items(limit: int = 50):
@@ -453,6 +562,9 @@ async def get_board_items(limit: int = 50):
         "Accept": "application/json"
     }
 
+    # Ограничиваем limit значением 50 (максимум для Miro API)
+    limit = min(limit, 50)
+
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items?limit={limit}",
@@ -460,7 +572,23 @@ async def get_board_items(limit: int = 50):
         )
 
     if response.status_code == 200:
-        return response.json()
+        items = response.json()
+
+        # Извлекаем фреймы для удобства
+        frames = []
+        for item in items.get("data", []):
+            if item.get("type") == "frame":
+                frames.append({
+                    "id": item.get("id"),
+                    "title": item.get("data", {}).get("title"),
+                    "position": item.get("position")
+                })
+
+        return {
+            "total_items": len(items.get("data", [])),
+            "frames": frames,
+            "items": items
+        }
     else:
         raise HTTPException(
             status_code=response.status_code,
@@ -468,32 +596,9 @@ async def get_board_items(limit: int = 50):
         )
 
 
-@app.delete("/board/items/{item_id}", tags=["Board"], status_code=status.HTTP_204_NO_CONTENT)
-async def delete_item(item_id: str):
-    """Удаление элемента с доски"""
-    headers = {
-        "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
-        "Accept": "application/json"
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.delete(
-            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items/{item_id}",
-            headers=headers
-        )
-
-    if response.status_code == 204:
-        return {"message": "Item deleted successfully"}
-    else:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"Miro API error: {response.text}"
-        )
-
-
-@app.get("/test/connection", tags=["Test"])
-async def test_connection():
-    """Проверка подключения к Miro API"""
+@app.get("/board/frames", tags=["Board"])
+async def get_board_frames():
+    """Получение только фреймов с доски"""
     headers = {
         "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
         "Accept": "application/json"
@@ -501,70 +606,32 @@ async def test_connection():
 
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}",
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/items?limit=50",
             headers=headers
         )
 
     if response.status_code == 200:
-        board_info = response.json()
+        items = response.json()
+        frames = []
+
+        for item in items.get("data", []):
+            if item.get("type") == "frame":
+                item_id = item.get("id")
+                numeric_id = extract_numeric_id(item_id)
+
+                frames.append({
+                    "id": item_id,
+                    "numeric_id": numeric_id,
+                    "title": item.get("data", {}).get("title", "Без названия"),
+                    "position": item.get("position"),
+                    "geometry": item.get("geometry"),
+                    "created_at": item.get("createdAt")
+                })
+
         return {
-            "status": "connected",
-            "board": {
-                "name": board_info.get("name"),
-                "id": board_info.get("id"),
-                "viewLink": board_info.get("viewLink"),
-                "createdAt": board_info.get("createdAt")
-            }
+            "frames_count": len(frames),
+            "frames": frames
         }
-    else:
-        return {
-            "status": "error",
-            "code": response.status_code,
-            "detail": response.text
-        }
-
-
-# ========== ТЕСТОВЫЙ ЭНДПОИНТ ДЛЯ ОТЛАДКИ ==========
-
-@app.post("/test/create-card-minimal", tags=["Test"])
-async def test_create_card_minimal():
-    """Тест: создание минимальной карточки"""
-    headers = {
-        "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    # Минимальный payload без style вообще
-    payload = {
-        "data": {
-            "title": "Минимальная карточка"
-        },
-        "position": {
-            "origin": "center",
-            "x": 700,
-            "y": 700
-        },
-        "geometry": {
-            "width": 256,  # Абсолютный минимум
-            "height": 100
-        }
-    }
-
-    print(f"\n🔍 Тест: создание минимальной карточки")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/cards",
-            headers=headers,
-            json=payload
-        )
-
-    print(f"Status: {response.status_code}")
-    print(f"Response: {response.text[:200]}")
-
-    if response.status_code == 201:
-        return response.json()
     else:
         raise HTTPException(
             status_code=response.status_code,
@@ -572,9 +639,11 @@ async def test_create_card_minimal():
         )
 
 
-@app.post("/test/create-card-with-color", tags=["Test"])
-async def test_create_card_with_color():
-    """Тест: создание карточки с цветом"""
+# ========== ТЕСТОВЫЕ ЭНДПОИНТЫ ==========
+
+@app.post("/test/create-card-no-frame", tags=["Test"])
+async def test_create_card_no_frame():
+    """Тест: создание карточки БЕЗ фрейма"""
     headers = {
         "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
         "Content-Type": "application/json"
@@ -582,13 +651,13 @@ async def test_create_card_with_color():
 
     payload = {
         "data": {
-            "title": "Карточка с цветом",
-            "description": "Тестовая карточка"
+            "title": "Карточка без фрейма",
+            "description": "Тестовая карточка созданная без родительского фрейма"
         },
         "position": {
             "origin": "center",
-            "x": 900,
-            "y": 700
+            "x": -500,
+            "y": 500
         },
         "style": {
             "cardTheme": "#E3F2FD"
@@ -599,6 +668,158 @@ async def test_create_card_with_color():
         }
     }
 
+    print(f"\n🔍 Тест: карточка без фрейма")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/cards",
+            headers=headers,
+            json=payload
+        )
+
+    print(f"Status: {response.status_code}")
+    if response.status_code == 201:
+        print("✅ Успех!")
+        return response.json()
+    else:
+        print(f"❌ Ошибка: {response.text}")
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Miro API error: {response.text}"
+        )
+
+
+@app.post("/test/create-card-with-real-frame", tags=["Test"])
+async def test_create_card_with_real_frame():
+    """Тест: создание карточки с реальным фреймом"""
+
+    # Сначала получим существующие фреймы
+    frames_response = await get_board_frames()
+
+    if frames_response["frames_count"] == 0:
+        # Создаем тестовый фрейм
+        frame_response = await create_frame_element(CreateFrameRequest(
+            day_name="Тестовый день",
+            position=Position(x=0, y=0),
+            width=800,
+            height=1200,
+            fill_color="#F8F9FA"
+        ))
+
+        frame_id = frame_response["id"]
+        frame_title = "Тестовый день"
+    else:
+        # Используем первый существующий фрейм
+        frame = frames_response["frames"][0]
+        frame_id = frame["id"]
+        frame_title = frame["title"]
+
+    headers = {
+        "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Используем минимальную ширину 256 и центр фрейма
+    payload = {
+        "data": {
+            "title": f"Карточка в {frame_title}",
+            "description": f"Тестовая карточка внутри фрейма '{frame_title}'"
+        },
+        "position": {
+            "origin": "center",
+            "x": 0,
+            "y": 0
+        },
+        "style": {
+            "cardTheme": "#E8F5E9"
+        },
+        "geometry": {
+            "width": 256,  # Минимальная ширина!
+            "height": 180
+        },
+        "parent": {
+            "id": extract_numeric_id(frame_id) or frame_id
+        }
+    }
+
+    print(f"\n🔍 Тест: карточка с фреймом")
+    print(f"Frame: {frame_title} (ID: {frame_id})")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/cards",
+            headers=headers,
+            json=payload
+        )
+
+    print(f"Status: {response.status_code}")
+    if response.status_code == 201:
+        print("✅ Успех!")
+        return {
+            "message": "Карточка успешно создана внутри фрейма",
+            "frame": {
+                "id": frame_id,
+                "title": frame_title
+            },
+            "card": response.json()
+        }
+    else:
+        print(f"❌ Ошибка: {response.text}")
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Miro API error: {response.text}"
+        )
+
+
+@app.post("/test/create-card-inside-frame-safe", tags=["Test"])
+async def test_create_card_inside_frame_safe():
+    """Безопасный тест: создание карточки внутри фрейма"""
+
+    # Сначала создадим фрейм специально для теста
+    frame_response = await create_frame_element(CreateFrameRequest(
+        day_name="Тестовый фрейм для API",
+        position=Position(x=1000, y=0),  # Правая часть доски
+        width=600,
+        height=800,
+        fill_color="#F0F8FF"
+    ))
+
+    frame_id = frame_response["id"]
+
+    # Теперь создаем маленькую карточку прямо в центре этого фрейма
+    headers = {
+        "Authorization": f"Bearer {MIRO_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "data": {
+            "title": "Тестовая карточка",
+            "description": "Создана внутри фрейма через API"
+        },
+        "position": {
+            "origin": "center",
+            "x": 0,
+            "y": 0
+        },
+        "style": {
+            "cardTheme": "#E3F2FD"
+        },
+        "geometry": {
+            "width": 256,  # Минимальная ширина
+            "height": 150
+        },
+        "parent": {
+            "id": extract_numeric_id(frame_id) or frame_id
+        }
+    }
+
+    print(f"\n🔍 Безопасный тест: карточка внутри фрейма")
+    print(f"Frame ID: {frame_id}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{MIRO_API_BASE_URL}/boards/{MIRO_BOARD_ID}/cards",
@@ -607,7 +828,12 @@ async def test_create_card_with_color():
         )
 
     if response.status_code == 201:
-        return response.json()
+        return {
+            "success": True,
+            "message": "Карточка успешно создана внутри фрейма",
+            "frame_id": frame_id,
+            "card": response.json()
+        }
     else:
         raise HTTPException(
             status_code=response.status_code,
@@ -615,80 +841,24 @@ async def test_create_card_with_color():
         )
 
 
-# ========== ШАБЛОНЫ РАСПИСАНИЯ ==========
-
-@app.post("/schedule/week", tags=["Schedule"], status_code=status.HTTP_201_CREATED)
-async def create_week_schedule():
-    """
-    Создание полной структуры расписания на неделю
-    """
-    days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
-    results = []
-
-    for i, day in enumerate(days):
-        # Создаем фрейм для дня
-        frame_response = await create_frame_element(CreateFrameRequest(
-            day_name=day,
-            position=Position(x=i * 450, y=0),
-            width=400,
-            height=1200,
-            fill_color="#F8F9FA"
-        ))
-
-        # Создаем заголовок дня
-        await create_text_element(CreateTextRequest(
-            content=f"📅 {day.upper()}",
-            position=Position(x=i * 450, y=-550),
-            font_size=28,
-            color="#1976D2",
-            text_align="center"
-        ))
-
-        # Добавляем временные метки
-        times = ["9:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00"]
-        for j, time in enumerate(times):
-            await create_text_element(CreateTextRequest(
-                content=f"🕐 {time}",
-                position=Position(x=i * 450 - 150, y=-400 + (j * 170)),
-                font_size=14,
-                color="#666666",
-                text_align="left"
-            ))
-
-        results.append({
-            "day": day,
-            "frame_id": frame_response["id"],
-            "position": i * 450
-        })
-
-    return {
-        "message": "Week schedule structure created successfully",
-        "frames": results
-    }
-
-
 # ========== КОРНЕВОЙ ЭНДПОИНТ ==========
 
 @app.get("/", tags=["Root"])
 async def root():
     return {
-        "message": "University Schedule Miro API v1.0.4",
+        "message": "University Schedule Miro API v1.0.6",
         "status": "running",
         "docs": "/docs",
-        "version": "1.0.4",
-        "test_endpoints": [
-            "/test/connection",
-            "/test/create-card-minimal",
-            "/test/create-card-with-color",
-            "/demo/create-simple-card",
-            "/demo/create-simple-text"
-        ],
-        "limitations": {
-            "card_min_width": 256,
-            "card_min_height": 50,
-            "max_title_length": 500,
-            "max_description_length": 5000
-        }
+        "version": "1.0.6",
+        "important": "frame_id должен быть числовым ID",
+        "useful_endpoints": [
+            "/board/frames - получить список фреймов",
+            "/board/items/{id} - получить информацию об элементе",
+            "/board/items/{id} (DELETE) - удалить элемент",
+            "/board/cleanup/test-items - удалить все тестовые элементы",
+            "/test/create-card-no-frame - создать карточку без фрейма",
+            "/test/create-card-with-real-frame - создать карточку с фреймом"
+        ]
     }
 
 
@@ -697,39 +867,33 @@ def custom_openapi():
         return app.openapi_schema
 
     openapi_schema = get_openapi(
-        title="University Schedule Miro API v1.0.4",
-        version="1.0.4",
+        title="University Schedule Miro API v1.0.6",
+        version="1.0.6",
         description="""
-        ## 🎯 Рабочий API для Miro с исправленными ограничениями
+        🎯 API для Miro
 
-        ### ✅ ИСПРАВЛЕНО: Убран textAlign для карточек
+        📋 Важная информация:
 
-        ### 📏 Важные ограничения Miro API:
+        1. **frame_id должен быть числовым ID** (например: "34567890123456789012")
+        2. Если не знаете ID фрейма, используйте `/board/frames` чтобы получить список
+        3. Можно создавать карточки без фрейма (просто не указывайте frame_id)
 
-        | Элемент | Поддерживаемые параметры style |
-        |---------|--------------------------------|
-        | Карточка | только `cardTheme` |
-        | Текст | `color`, `fontSize`, `textAlign` |
-        | Фрейм | `fillColor` |
+        🚀 Полезные эндпоинты:
 
-        ### 🚀 Тестовые эндпоинты:
-
-        1. **Минимальная карточка:**
         ```bash
-        curl -X POST http://localhost:8000/test/create-card-minimal
+        # Получить список всех фреймов на доске
+        curl http://localhost:8000/board/frames
+
+        # Создать карточку БЕЗ фрейма (для теста)
+        curl -X POST http://localhost:8000/test/create-card-no-frame
+
+        # Создать карточку с реальным фреймом
+        curl -X POST http://localhost:8000/test/create-card-with-real-frame
         ```
 
-        2. **Карточка с цветом:**
-        ```bash
-        curl -X POST http://localhost:8000/test/create-card-with-color
-        ```
+        📝 Примеры запросов:
 
-        3. **Демо карточка:**
-        ```bash
-        curl -X POST http://localhost:8000/demo/create-simple-card
-        ```
-
-        ### 📝 Пример создания карточки:
+        Карточка БЕЗ фрейма:
         ```bash
         curl -X POST http://localhost:8000/cards \\
           -H "Content-Type: application/json" \\
@@ -743,10 +907,41 @@ def custom_openapi():
           }'
         ```
 
-        ### ⚠️ Важно:
-        - Для карточек НЕ используйте `textAlign` в style
-        - Минимальная ширина карточки: 256px
-        - Для текста можно использовать `textAlign`
+        Карточка С фреймом:
+        ```bash
+        curl -X POST http://localhost:8000/cards \\
+          -H "Content-Type: application/json" \\
+          -d '{
+            "title": "Математика",
+            "description": "Лекция по алгебре",
+            "position": {"x": 0, "y": 0},
+            "width": 300,
+            "height": 200,
+            "fill_color": "#E3F2FD",
+            "frame_id": "34567890123456789012"
+          }'
+        ```
+        
+        🗑️ Управление элементами:
+
+        Получить информацию об элементе:
+        ```bash
+        curl http://localhost:8000/board/items/3458764657216552895
+        ```
+
+        Удалить элемент:
+        ```bash
+        curl -X DELETE http://localhost:8000/board/items/3458764657216552895
+        ```
+
+        Удалить несколько элементов:
+        ```bash
+        curl -X DELETE http://localhost:8000/board/items/batch?item_ids=id1&item_ids=id2&item_ids=id3
+        ```
+
+        ⚠️ Для Swagger тестирования:
+        В поле `frame_id` не указывайте "string" - это вызовет ошибку.
+        Либо оставьте поле пустым, либо получите реальный frame_id через `/board/frames`.
         """,
         routes=app.routes,
     )
