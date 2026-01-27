@@ -1,15 +1,30 @@
-API для создания онлайн-расписания университета на платформе Miro. Позволяет автоматически создавать структуру расписания, добавлять учебные пары, управлять элементами доски.
+Miro University Schedule API
 
-Быстрый старт
+Описание проекта
+[b] FastAPI приложение для создания и управления онлайн-расписанием университета на платформе Miro. API позволяет автоматически создавать структуру расписания, добавлять учебные пары, управлять элементами доски через RESTful интерфейс. [/b]
+
+Основные возможности
+- Создание текстовых элементов на доске
+- Создание карточек (учебных пар) с цветовой кодировкой по типу занятия
+- Создание фреймов для дней недели
+- Получение информации об элементах доски
+- Удаление элементов с доски
+- Автоматическая организация расписания
+
+Технологии
+- Python 3.8+
+- FastAPI
+- HTTPX для асинхронных запросов
+- Pydantic для валидации данных
+- Miro REST API v2
 
 Установка и запуск
 
-1. Клонируйте репозиторий:
-git clone <repository-url>
-cd board_miro_API
-
-2. Создайте виртуальное окружение и установите зависимости:
-py -m venv venv
+#1. Установка зависимостей
+```bash
+# Установите Python 3.8 или выше
+# Создайте виртуальное окружение
+python -m venv venv
 
 # Активация на Windows:
 venv\Scripts\activate
@@ -17,47 +32,44 @@ venv\Scripts\activate
 # Активация на Linux/Mac:
 source venv/bin/activate
 
-# Установка зависимостей:
+# Установите зависимости
 pip install -r requirements.txt
+```
 
-3. Настройте переменные окружения:
-- Создайте файл `.env` в корне проекта
-- Добавьте ваши токены Miro:
+#2. Настройка Miro API
+1. Зарегистрируйтесь на miro.com
+2. Перейдите на developers.miro.com
+3. Создайте новое приложение (Create app)
+4. Сгенерируйте Access Token с правами:
+   - boards:read
+   - boards:write
+   - team:read
+5. Создайте доску в Miro или используйте существующую
+6. Скопируйте Board ID из URL доски
 
-MIRO_ACCESS_TOKEN=ваш_личный_токен_miro
-MIRO_BOARD_ID=id_вашей_доски_miro
+#3. Конфигурация
+Создайте файл .env в корне проекта:
+```
+MIRO_ACCESS_TOKEN=ваш_токен_здесь
+MIRO_BOARD_ID=ваш_board_id_здесь
+```
 
-4. Запустите сервер:
+#4. Запуск сервера
+```bash
+python main.py
+# Или
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
 
-5. Откройте документацию API:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+После запуска документация API будет доступна по адресу:
+- http://localhost:8000/docs (Swagger UI)
+- http://localhost:8000/redoc (ReDoc)
 
-Получение токенов Miro
+Использование API
 
-1. Получение Access Token
-1. Зарегистрируйтесь на [miro.com](https://miro.com)
-2. Перейдите на [Miro Developer Platform](https://developers.miro.com)
-3. Войдите в свой аккаунт
-4. Нажмите "Create app"
-5. Выберите "For personal use"
-6. Введите название приложения (например, "University Schedule")
-7. Перейдите на вкладку "Access token"
-8. Нажмите "Generate new token"
-9. Выберите разрешения: `boards:read`, `boards:write`, `team:read`
-10. Скопируйте токен (показывается только один раз!)
+#Создание элементов
 
-2. Получение Board ID
-1. Откройте доску в браузере Miro
-2. Скопируйте ID из URL: `https://miro.com/app/board/{BOARD_ID}/`
-3. Или создайте новую доску через Miro интерфейс
-
-Основные возможности API
-
-Создание элементов
-
-1. Текстовые элементы (`POST /texts`)
+##1. Текстовые элементы
 ```bash
 curl -X POST http://localhost:8000/texts \
   -H "Content-Type: application/json" \
@@ -67,20 +79,10 @@ curl -X POST http://localhost:8000/texts \
     "font_size": 36,
     "color": "#1976D2"
   }'
+```
 
-2. Карточки (учебные пары) (`POST /cards`)
-curl -X POST http://localhost:8000/cards \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Математика",
-    "description": "Лекция по алгебре",
-    "position": {"x": 100, "y": 100},
-    "width": 300,
-    "height": 200,
-    "fill_color": "#E3F2FD"
-  }'
-
-3. Учебные пары с цветовой кодировкой (`POST /lectures`)
+##2. Карточки (учебные пары)
+```bash
 curl -X POST http://localhost:8000/lectures \
   -H "Content-Type: application/json" \
   -d '{
@@ -90,10 +92,12 @@ curl -X POST http://localhost:8000/lectures \
     "classroom": "101",
     "teacher": "Иванов И.И.",
     "subject_type": "lecture",
-    "position": {"x": 300, "y": 300}
+    "position": {"x": 0, "y": 0}
   }'
+```
 
-4. Фреймы дней недели (`POST /frames`)
+##3. Фреймы дней недели
+```bash
 curl -X POST http://localhost:8000/frames \
   -H "Content-Type: application/json" \
   -d '{
@@ -103,124 +107,150 @@ curl -X POST http://localhost:8000/frames \
     "height": 1200,
     "fill_color": "#F8F9FA"
   }'
+```
 
-Управление элементами
+#Получение информации
 
-1. Получение всех элементов (`GET /board/items`)
+##1. Получить все элементы доски
+```bash
 curl http://localhost:8000/board/items
+```
 
-2. Удаление элемента (`DELETE /board/items/{item_id}`)
-curl -X DELETE http://localhost:8000/board/items/uXjV1234567890
+##2. Получить только фреймы
+```bash
+curl http://localhost:8000/board/frames
+```
 
-Шаблоны расписания
+##3. Получить информацию об элементе по ID
+```bash
+curl http://localhost:8000/board/items/3458764657216552895
+```
 
-1. Создание структуры недели (`POST /schedule/week`)
-curl -X POST http://localhost:8000/schedule/week
+#Управление элементами
 
-2. Демо-элементы для тестирования:
+##1. Удалить элемент по ID
+```bash
+curl -X DELETE http://localhost:8000/board/items/3458764657216552895
+```
 
-# Тестовая карточка
-curl -X POST http://localhost:8000/demo/create-simple-card
+##2. Очистить тестовые элементы
+```bash
+curl -X DELETE http://localhost:8000/board/cleanup/test-items
+```
 
-# Тестовый текст
-curl -X POST http://localhost:8000/demo/create-simple-text
+#Тестовые эндпоинты
 
+##1. Тест создания карточки без фрейма
+```bash
+curl -X POST http://localhost:8000/test/create-card-no-frame
+```
 
-Примеры использования
+##2. Тест создания карточки внутри фрейма
+```bash
+curl -X POST http://localhost:8000/test/create-card-with-real-frame
+```
 
-Пример 1: Создание расписания на понедельник
-1. Создаем фрейм для понедельника
-curl -X POST http://localhost:8000/frames \
-  -H "Content-Type: application/json" \
-  -d '{
-    "day_name": "Понедельник",
-    "position": {"x": 0, "y": 0},
-    "width": 400,
-    "height": 1200,
-    "fill_color": "#F8F9FA"
-  }'
+Типы занятий и цвета
 
-Сохраняем frame_id из ответа, например: "uXjV1234567890"
+API автоматически применяет цветовую схему:
+- Лекция: #E3F2FD (светло-синий)
+- Практика: #E8F5E9 (светло-зеленый)
+- Лабораторная: #FFF3E0 (светло-оранжевый)
+- Семинар: #F3E5F5 (светло-фиолетовый)
+- Экзамен: #FFEBEE (светло-красный)
 
-2. Добавляем пары в понедельник
+Ограничения Miro API
+
+При работе с API учтите ограничения Miro:
+- Ширина карточки: минимум 256px
+- Высота карточки: минимум 50px
+- Длина заголовка: до 500 символов
+- Длина описания: до 5000 символов
+- Размер шрифта: от 1 до 200 (целое число)
+- Максимальное количество элементов в запросе: 50
+
+Пример создания полного расписания
+
+1. Создайте фреймы для дней недели:
+```bash
+for day in "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота"; do
+  curl -X POST http://localhost:8000/frames \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"day_name\": \"$day\",
+      \"position\": {\"x\": 0, \"y\": 0},
+      \"width\": 400,
+      \"height\": 1200,
+      \"fill_color\": \"#F8F9FA\"
+    }"
+done
+```
+
+2. Получите ID созданных фреймов:
+```bash
+curl http://localhost:8000/board/frames
+```
+
+3. Добавьте пары в соответствующие дни:
+```bash
 curl -X POST http://localhost:8000/lectures \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Математика",
-    "description": "Дифференциальные уравнения",
+    "description": "Лекция по алгебре",
     "time": "9:00-10:30",
     "classroom": "301",
     "teacher": "Проф. Иванов И.И.",
     "subject_type": "lecture",
-    "position": {"x": 0, "y": -400},
-    "frame_id": "uXjV1234567890"
-  }'
-
-curl -X POST http://localhost:8000/lectures \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Физика",
-    "description": "Механика",
-    "time": "11:00-12:30",
-    "classroom": "415",
-    "teacher": "Доц. Петрова А.С.",
-    "subject_type": "practice",
-    "position": {"x": 0, "y": -200},
-    "frame_id": "uXjV1234567890"
+    "position": {"x": 0, "y": 0},
+    "frame_id": "3458764657216552883"
   }'
 ```
 
-Пример 2: Создание полного расписания на неделю
-1. Создаем структуру недели
-curl -X POST http://localhost:8000/schedule/week
-2. Получаем frame_id из ответа для каждого дня
-3. Добавляем пары в каждый день аналогично Примеру 1
-
-Типы занятий и цвета
-
-API автоматически применяет цветовую схему по типу занятия:
-
-- `lecture` - Лекция (#E3F2FD, светло-синий)
-- `practice` - Практика (#E8F5E9, светло-зеленый)
-- `laboratory` - Лабораторная (#FFF3E0, светло-оранжевый)
-- `seminar` - Семинар (#F3E5F5, светло-фиолетовый)
-- `exam` - Экзамен (#FFEBEE, светло-красный)
-
-Ограничения Miro API
-
-- Минимальная ширина карточки: 256px
-- Минимальная высота карточки: 50px
-- Максимальная длина заголовка: 500 символов
-- Максимальная длина описания: 5000 символов
-- Размер шрифта: от 1 до 200
-
-Устранение неполадок
-
-Ошибка 401: Unauthorized
-- Проверьте правильность MIRO_ACCESS_TOKEN в .env файле
-- Убедитесь, что токен не истек
-- Проверьте, есть ли у токена права на запись
-
-Ошибка 400: Invalid parameters
-- Проверьте, что ширина карточки ≥ 256px
-- Убедитесь, что длина заголовка ≤ 500 символов
-- Для карточек не используйте textAlign в стиле
-
-Проверка подключения
-curl http://localhost:8000/test/connection
-
 Структура проекта
-
+```
 board_miro_API/
-├── main.py              # Основной файл FastAPI приложения
+├── main.py              # Основное приложение FastAPI
 ├── requirements.txt     # Зависимости Python
-├── .env                # Переменные окружения (не добавлять в git)
+├── .env                # Конфигурационные переменные
 ├── .gitignore          # Игнорируемые файлы
 └── README.md           # Документация
+```
 
 Зависимости
+В файле requirements.txt:
+```
+fastapi==0.104.1
+uvicorn==0.24.0
+httpx==0.25.0
+pydantic==2.5.0
+python-dotenv==1.0.0
+```
 
-- FastAPI - веб-фреймворк
-- Uvicorn - ASGI сервер
-- HTTPX - HTTP клиент
-- Pydantic - валидация данных
+Устранение проблем
+
+#Ошибка 401: Unauthorized
+Проверьте:
+1. Правильность MIRO_ACCESS_TOKEN в .env файле
+2. Срок действия токена (токены Miro действительны 1 год)
+3. Наличие необходимых прав у токена
+
+#Ошибка 400: Invalid parameters
+Проверьте:
+1. Ширина карточки ≥ 256px
+2. Высота карточки ≥ 50px
+3. font_size - целое число от 1 до 200
+4. Для карточек внутри фрейма используйте относительные координаты
+
+#Карточка создается вне фрейма
+При указании frame_id используйте относительные координаты:
+- x: 0, y: 0 - центр фрейма
+- x: 0, y: -100 - 100px выше центра фрейма
+
+Безопасность
+- Никогда не коммитьте .env файл в Git
+- Используйте переменные окружения на продакшн серверах
+- Ограничьте доступ к API при развертывании в продакшн
+
+Лицензия
+MIT License
