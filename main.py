@@ -1,4 +1,3 @@
-# main.py (исправленная версия для parent.id)
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
@@ -966,3 +965,4 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
