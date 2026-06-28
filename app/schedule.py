@@ -28,6 +28,7 @@ inline-CSS font-size в HTML работает непредсказуемо и ч
 
 При удалении/переносе пары мы храним массив всех её ID и удаляем все.
 """
+from math import ceil
 from typing import Optional
 
 from . import miro_client, storage
@@ -48,7 +49,7 @@ from .config import (
 # =============================================================================
 
 # Ширина цветного корешка слева у карточки пары.
-CARD_SPINE_WIDTH = 12
+CARD_SPINE_WIDTH = 10
 
 # Внутренние отступы карточки от её краёв (после корешка).
 CARD_PAD_LEFT = CARD_SPINE_WIDTH + 22  # от левого края карточки до начала текста
@@ -225,16 +226,16 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
     if compact:
         pad_left = CARD_SPINE_WIDTH + 18
         pad_right = 18
-        # В половинке мало места: тип уносим в инфо-строку, название — в 2 строки.
-        type_size, subject_size, info_size = 0, 22, 17
-        subject_lines = 2
+        # В половинке мало места: тип уносим в инфо-строку.
+        type_size, info_size, teacher_size = 0, 17, 0
+        subj_base, subj_min, subj_max_lines = 22, 14, 2
         gap = 6
         show_type = False
     else:
         pad_left = CARD_PAD_LEFT
         pad_right = CARD_PAD_RIGHT
-        type_size, subject_size, info_size, teacher_size = 24, 36, 24, 22
-        subject_lines = 2
+        type_size, info_size, teacher_size = 24, 24, 22
+        subj_base, subj_min, subj_max_lines = 36, 18, 3
         gap = 10
         show_type = True
 
@@ -250,9 +251,9 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
     )
     ids.append(bg["id"])
 
-    # --- 2. Цветной корешок слева (почти на всю высоту карточки) ---
-    spine_inset = 10
-    spine_x = left + CARD_SPINE_WIDTH / 2 + 6
+    # --- 2. Цветной корешок слева (не доходит до скруглённых углов) ---
+    spine_inset = 18
+    spine_x = left + CARD_SPINE_WIDTH / 2 + 7
     spine = miro_client.create_shape(
         content="",
         x=spine_x, y=cy,
@@ -271,15 +272,76 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
     text_center_x = text_left + text_width / 2
 
     def _est(font: int, lines: int = 1) -> float:
-        """Грубая оценка высоты text-объекта Miro (для вертикального центрирования)."""
+        """Грубая оценка высоты однострочного text-объекта Miro."""
         return font * 1.34 * lines
 
-    # Оценим суммарную высоту блока, чтобы отцентрировать его по вертикали.
-    if compact:
-        block_h = _est(subject_size, subject_lines) + gap + _est(info_size)
+    def _subj_h(font: int, lines: int) -> float:
+        """Высота названия — с запасом по межстрочному интервалу, чтобы не налезало."""
+        return font * 1.42 * lines
+
+    # Для длинных названий освобождаем строку преподавателя (уносим её в инфо),
+    # чтобы у дисциплины было больше места по высоте.
+    merge_teacher = (not compact) and len(lesson["subject"]) > 28
+    if merge_teacher:
+        subj_base, subj_max_lines = 30, 3
+    teacher_in_info = compact or merge_teacher
+    has_teacher_row = (not compact) and not merge_teacher
+
+    # --- Адаптивный размер названия ---
+    # Чем длиннее дисциплина, тем мельче шрифт и/или больше строк, пока всё не
+    # уляжется в отведённую высоту в пределах subj_max_lines. Так длинные названия
+    # не вылезают за карточку и не наезжают на строку с аудиторией.
+    subject = lesson["subject"]
+    pad_v = 16 if compact else 24
+    fixed = _est(info_size) + gap
+    if show_type:
+        fixed += _est(type_size) + gap
+    if has_teacher_row:
+        fixed += _est(teacher_size) + gap
+    avail_subject = (h - pad_v) - fixed
+
+    def _chars_per_line(fs: int) -> int:
+        # 0.64 — ширина символа относительно кегля (с запасом под open_sans)
+        return max(1, int(text_width / (fs * 0.64)))
+
+    def _wrap_lines(text: str, fs: int) -> int:
+        """Сколько строк займёт текст при переносе ПО СЛОВАМ (как в Miro)."""
+        cpl = _chars_per_line(fs)
+        lines, cur = 1, 0
+        for wd in text.split():
+            wl = len(wd)
+            if cur == 0:
+                cur = wl            # первое слово строки кладём всегда
+            elif cur + 1 + wl <= cpl:
+                cur += 1 + wl
+            else:
+                lines += 1
+                cur = wl
+        return lines
+
+    # Потолок шрифта, при котором самое длинное СЛОВО ещё влезает в строку целиком
+    # (Miro переносит только по пробелам — неразрывное слово иначе вылезет вбок).
+    max_word = max((len(w) for w in subject.split()), default=1)
+    fs_cap = int(text_width / (max_word * 0.64))
+    fs_hi = max(subj_min, min(subj_base, fs_cap))
+
+    subject_size, subject_lines = subj_min, subj_max_lines
+    for fs in range(fs_hi, subj_min - 1, -1):
+        lines = _wrap_lines(subject, fs)
+        if lines <= subj_max_lines and _subj_h(fs, lines) <= avail_subject:
+            subject_size, subject_lines = fs, lines
+            break
     else:
-        block_h = (_est(type_size) + gap + _est(subject_size, subject_lines)
-                   + gap + _est(info_size) + gap + _est(teacher_size))
+        subject_size = subj_min
+        subject_lines = min(subj_max_lines, _wrap_lines(subject, subj_min))
+    subject_h = _subj_h(subject_size, subject_lines)
+
+    # Оценим суммарную высоту блока, чтобы отцентрировать его по вертикали.
+    block_h = subject_h + gap + _est(info_size)
+    if show_type:
+        block_h += _est(type_size) + gap
+    if has_teacher_row:
+        block_h += gap + _est(teacher_size)
 
     pad_top_min = 8 if compact else 12
     y_cursor = top + max(pad_top_min, (h - block_h) / 2)
@@ -299,8 +361,7 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
         ids.append(type_text["id"])
         y_cursor += _est(type_size) + gap
 
-    # 4. Дисциплина — самое крупное, жирное
-    subject_h = _est(subject_size, subject_lines)
+    # 4. Дисциплина — самое крупное, жирное (размер подобран адаптивно выше)
     subject_text = miro_client.create_text(
         content=f'<b>{lesson["subject"]}</b>',
         x=text_center_x,
@@ -317,8 +378,8 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
     icon = FORMAT_ICONS.get(lesson["format"], "")
     room = lesson["room"]
 
-    if compact:
-        # 5. Тип + аудитория + преподаватель — одной строкой
+    if teacher_in_info:
+        # Инфо-строка с преподавателем (половинки и длинные названия)
         info_text = miro_client.create_text(
             content=(f'<b>{lesson["lesson_type"]}</b>&nbsp; · &nbsp;'
                      f'ауд. {room}&nbsp; · &nbsp;{lesson["teacher"]}'),
@@ -332,7 +393,7 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
         )
         ids.append(info_text["id"])
     else:
-        # 5. Формат + аудитория
+        # Формат + аудитория, отдельной строкой
         info_text = miro_client.create_text(
             content=f'{icon}&nbsp; {lesson["format"]}&nbsp; · &nbsp;<b>ауд. {room}</b>',
             x=text_center_x,
@@ -344,9 +405,9 @@ def _create_card_components(lesson: dict, frame_id: str) -> list[str]:
             parent_id=frame_id,
         )
         ids.append(info_text["id"])
-        y_cursor += _est(info_size) + gap
 
-        # 6. Преподаватель
+    if has_teacher_row:
+        y_cursor += _est(info_size) + gap
         teacher_text = miro_client.create_text(
             content=f'👤&nbsp; {lesson["teacher"]}',
             x=text_center_x,
@@ -460,7 +521,7 @@ def _make_title(frame_id: str, title: str) -> None:
             'Пара на всю ячейку идёт каждую неделю.'
         ),
         x=tx,
-        y=ty + 42,
+        y=ty + 48,
         width=width - 60,
         font_size=20,
         text_color="#94A3B8",
