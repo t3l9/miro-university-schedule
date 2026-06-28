@@ -101,7 +101,7 @@ CARD_HEIGHT = 240
 COL_GAP = 20        # отступ между колонками-днями
 ROW_GAP = 20        # отступ между строками-парами
 
-TITLE_HEIGHT = 170  # высота большой плашки-титула наверху
+TITLE_HEIGHT = 195  # высота большой плашки-титула наверху
 HEADER_HEIGHT = 90  # высота шапки с названием дня
 TIME_COL_WIDTH = 200
 
@@ -126,8 +126,6 @@ COLORS_BY_TYPE: dict[str, dict[str, str]] = {
     "практика":     {"fill": "#ECFDF5", "accent": "#059669", "badge_text": "#FFFFFF"},  # emerald
     "лабораторная": {"fill": "#FFF7ED", "accent": "#EA580C", "badge_text": "#FFFFFF"},  # orange
     "семинар":      {"fill": "#FDF2F8", "accent": "#DB2777", "badge_text": "#FFFFFF"},  # pink
-    "экзамен":      {"fill": "#FEF2F2", "accent": "#DC2626", "badge_text": "#FFFFFF"},  # red
-    "консультация": {"fill": "#F5F3FF", "accent": "#7C3AED", "badge_text": "#FFFFFF"},  # violet
     "default":      {"fill": "#F8FAFC", "accent": "#64748B", "badge_text": "#FFFFFF"},  # slate
 }
 
